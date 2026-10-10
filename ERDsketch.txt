@@ -1,0 +1,236 @@
+
+Project bank_sampah_berlangganan {
+  database_type: 'MySQL'
+  Note: 'ERD aplikasi Bank Sampah Berlangganan dengan Laravel dan Midtrans Sandbox'
+}
+
+Enum user_role {
+  admin
+  user
+  petugas
+}
+
+Enum subscription_status {
+  pending_payment
+  active
+  past_due
+  suspended
+  cancelled
+}
+
+Enum invoice_status {
+  unpaid
+  paid
+  expired
+  cancelled
+}
+
+Enum payment_status {
+  pending
+  settlement
+  capture
+  expire
+  cancel
+  deny
+  failure
+}
+
+Enum pickup_status {
+  scheduled
+  assigned
+  in_progress
+  completed
+  skipped
+  failed
+}
+
+// ========================================
+// 1. PENGGUNA
+// ========================================
+
+Table users {
+  id bigint [pk, increment]
+  name varchar(150) [not null]
+  email varchar(150) [not null, unique]
+  phone varchar(20) [not null]
+  password varchar(255) [not null]
+  role user_role [not null, default: 'user']
+  email_verified_at timestamp
+  remember_token varchar(100)
+  created_at timestamp
+  updated_at timestamp
+
+  Note: 'Menyimpan akun admin, pelanggan, dan petugas'
+}
+
+// ========================================
+// 2. ALAMAT PELANGGAN
+// ========================================
+
+Table customer_addresses {
+  id bigint [pk, increment]
+  user_id bigint [not null]
+  label varchar(100)
+  recipient_name varchar(150) [not null]
+  phone varchar(20) [not null]
+  address text [not null]
+  village varchar(100)
+  district varchar(100)
+  city varchar(100)
+  province varchar(100)
+  postal_code varchar(10)
+  latitude decimal(10,7)
+  longitude decimal(10,7)
+  is_primary boolean [not null, default: true]
+  notes text
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    user_id
+  }
+
+  Note: 'Alamat penjemputan; mendukung lebih dari satu alamat per pelanggan'
+}
+
+// ========================================
+// 3. LANGGANAN PELANGGAN
+// ========================================
+
+Table subscriptions {
+  id bigint [pk, increment]
+  user_id bigint [not null, unique]
+  monthly_fee bigint [not null, default: 25000]
+  status subscription_status [not null, default: 'pending_payment']
+  started_at timestamp
+  current_period_start timestamp
+  current_period_end timestamp
+  grace_until timestamp
+  suspended_at timestamp
+  cancelled_at timestamp
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    (status, current_period_end)
+  }
+
+  Note: 'Satu langganan per pelanggan untuk versi awal aplikasi'
+}
+
+// ========================================
+// 4. TAGIHAN BULANAN
+// ========================================
+
+Table invoices {
+  id bigint [pk, increment]
+  subscription_id bigint [not null]
+  invoice_number varchar(50) [not null, unique]
+  amount bigint [not null, default: 25000]
+  period_start timestamp [not null]
+  period_end timestamp [not null]
+  due_at timestamp [not null]
+  grace_until timestamp
+  status invoice_status [not null, default: 'unpaid']
+  paid_at timestamp
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    (subscription_id, period_start) [unique]
+    (status, due_at)
+  }
+
+  Note: 'Satu tagihan untuk setiap periode langganan'
+}
+
+// ========================================
+// 5. PEMBAYARAN MIDTRANS
+// ========================================
+
+Table payments {
+  id bigint [pk, increment]
+  invoice_id bigint [not null]
+  order_id varchar(100) [not null, unique]
+  transaction_id varchar(100) [unique]
+  payment_type varchar(50)
+  transaction_status payment_status [not null, default: 'pending']
+  fraud_status varchar(30)
+  gross_amount bigint [not null]
+  transaction_time timestamp
+  paid_at timestamp
+  notification_payload json
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    (invoice_id, transaction_status)
+  }
+
+  Note: 'Menyimpan setiap percobaan pembayaran dan notifikasi Midtrans'
+}
+
+// ========================================
+// 6. JADWAL PENJEMPUTAN SAMPAH
+// ========================================
+
+Table pickup_schedules {
+  id bigint [pk, increment]
+  subscription_id bigint [not null]
+  address_id bigint [not null]
+  assigned_to bigint
+  scheduled_for timestamp [not null]
+  status pickup_status [not null, default: 'scheduled']
+  assigned_at timestamp
+  started_at timestamp
+  completed_at timestamp
+  notes text
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    (scheduled_for, status)
+    (assigned_to, scheduled_for)
+    (subscription_id, scheduled_for) [unique]
+  }
+
+  Note: 'Jadwal penjemputan mingguan dan petugas yang ditugaskan'
+}
+
+// ========================================
+// 7. CATATAN HASIL PENJEMPUTAN
+// ========================================
+
+Table pickup_records {
+  id bigint [pk, increment]
+  pickup_schedule_id bigint [not null, unique]
+  organic_weight_kg decimal(10,2) [not null, default: 0]
+  inorganic_weight_kg decimal(10,2) [not null, default: 0]
+  photo_path varchar(255)
+  collected_at timestamp
+  notes text
+  created_at timestamp
+  updated_at timestamp
+
+  Note: 'Berat sampah organik dan anorganik yang berhasil dikumpulkan'
+}
+
+// ========================================
+// RELASI ANTARTABEL
+// ========================================
+
+Ref: customer_addresses.user_id > users.id
+
+Ref: subscriptions.user_id > users.id
+
+Ref: invoices.subscription_id > subscriptions.id
+
+Ref: payments.invoice_id > invoices.id
+
+Ref: pickup_schedules.subscription_id > subscriptions.id
+
+Ref: pickup_schedules.address_id > customer_addresses.id
+
+Ref: pickup_schedules.assigned_to > users.id
+
+Ref: pickup_records.pickup_schedule_id > pickup_schedules.id
